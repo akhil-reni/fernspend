@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Join a workspace · Fernspend</title><link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/assets/app.css"></head>
+<body>
+<header class="container nav"><a class="logo" href="/" id="lg"><span>Fernspend</span></a></header>
+<div class="auth-wrap"><div class="auth card pad" id="box"><p class="muted">Loading invitation…</p></div></div>
+<script src="/assets/common.js"></script>
+<script>
+const { api, esc, $ } = FS;
+$('#lg').insertAdjacentHTML('afterbegin', FS.logo);
+const token = new URLSearchParams(location.search).get('token') || '';
+(async () => {
+  let inv;
+  try { inv = await api(`/invites/${encodeURIComponent(token)}`, { allow401: true }); }
+  catch (e) { $('#box').innerHTML = `<h1>Invitation not found</h1><p class="muted">${esc(e.message)}</p>`; return; }
+  if (inv.accepted) { $('#box').innerHTML = `<h1>Already accepted</h1><p class="muted">This invitation has already been used.</p><a class="btn btn-primary w100" href="/login">Sign in</a>`; return; }
+  $('#box').innerHTML = `<h1>Join ${esc(inv.org_name)}</h1><p class="muted">${esc(inv.invited_by)} invited <strong>${esc(inv.email)}</strong> to join as ${esc(inv.role)}.</p>
+    <button class="btn btn-primary w100" id="go">Accept invitation</button><p class="small muted">Not signed in? <a href="/login?next=${encodeURIComponent('/invite?token=' + token)}">Sign in</a> or <a href="/signup">create an account</a> first.</p><div class="alert" id="msg"></div>`;
+  $('#go').onclick = async () => {
+    try { await api('/invites/accept', { method: 'POST', body: { token } }); location.href = '/app'; }
+    catch (e) { const m = $('#msg'); m.className = 'alert error show'; m.textContent = e.message; }
+  };
+})();
+</script></body></html>

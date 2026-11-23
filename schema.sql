@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS orgs (
   seats         INTEGER NOT NULL DEFAULT 5,
   sso_domain    TEXT,
   sso_provider  TEXT,
+  invite_domain TEXT,
+  internal_notes TEXT,
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -71,4 +73,62 @@ CREATE TABLE IF NOT EXISTS integration_secrets (
   label      TEXT NOT NULL,
   value      TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS wallets (
+  user_id       TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  balance_cents INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS receipts (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  expense_id   TEXT NOT NULL REFERENCES expenses(id) ON DELETE CASCADE,
+  org_id       TEXT NOT NULL,
+  filename     TEXT NOT NULL,
+  content_type TEXT NOT NULL,
+  data_b64     TEXT NOT NULL,
+  size         INTEGER NOT NULL,
+  created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS comments (
+  id         TEXT PRIMARY KEY,
+  expense_id TEXT NOT NULL REFERENCES expenses(id) ON DELETE CASCADE,
+  user_id    TEXT NOT NULL REFERENCES users(id),
+  body       TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS invites (
+  token      TEXT PRIMARY KEY,
+  org_id     TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+  email      TEXT NOT NULL,
+  role       TEXT NOT NULL DEFAULT 'member',
+  invited_by TEXT NOT NULL,
+  accepted   INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS reports (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  org_id      TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+  title       TEXT NOT NULL,
+  period_from TEXT NOT NULL,
+  period_to   TEXT NOT NULL,
+  created_by  TEXT NOT NULL,
+  share_sig   TEXT,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS api_tokens (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  org_id       TEXT NOT NULL,
+  role         TEXT NOT NULL,
+  name         TEXT NOT NULL,
+  scope        TEXT NOT NULL DEFAULT 'read',
+  token_hash   TEXT NOT NULL UNIQUE,
+  prefix       TEXT NOT NULL,
+  last_used_at TEXT,
+  created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );

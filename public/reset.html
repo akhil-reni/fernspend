@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Choose a new password · Fernspend</title><link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/assets/app.css"></head>
+<body>
+<header class="container nav"><a class="logo" href="/" id="lg"><span>Fernspend</span></a></header>
+<div class="auth-wrap"><div class="auth card pad">
+  <h1>Choose a new password</h1>
+  <form id="f"><label>New password</label><input id="pw" type="password" minlength="10" required autocomplete="new-password">
+  <button class="btn btn-primary w100" style="margin-top:18px">Update password</button></form>
+  <div class="alert" id="msg"></div>
+</div></div>
+<script src="/assets/common.js"></script>
+<script>
+const { api, $, alertBox } = FS;
+$('#lg').insertAdjacentHTML('afterbegin', FS.logo);
+const p = new URLSearchParams(location.search);
+$('#f').onsubmit = async (e) => { e.preventDefault();
+  try { await api('/auth/reset', { method: 'POST', allow401: true, body: { email: p.get('email'), token: p.get('token'), password: $('#pw').value } });
+    alertBox($('#msg'), 'Password updated. Redirecting to sign in…', 'info'); setTimeout(() => location.href = '/login', 1200); }
+  catch (err) { alertBox($('#msg'), err.message); } };
+</script></body></html>

@@ -4,12 +4,38 @@
 <body><div class="shell"><aside class="side" id="side"></aside>
 <main class="main">
   <div class="page-head"><h1>Workspace settings</h1></div>
-  <div class="tabs"><button data-t="general" class="active">General</button><button data-t="members">Members</button><button data-t="billing">Billing</button><button data-t="webhooks">Webhooks</button></div>
+  <div class="tabs"><button data-t="general" class="active">General</button><button data-t="members">Members</button><button data-t="security">Security</button><button data-t="tokens">API tokens</button><button data-t="account">Your account</button><button data-t="billing">Billing</button><button data-t="webhooks">Webhooks</button></div>
   <section id="t-general" class="card pad" style="max-width:640px">
     <form id="gf"><label>Workspace name</label><input id="wname"><label>Workspace URL</label><input id="wslug" disabled>
     <button class="btn btn-primary" style="margin-top:16px">Save changes</button><div class="alert" id="gmsg"></div></form>
   </section>
-  <section id="t-members" class="card" hidden><div class="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Joined</th></tr></thead><tbody id="mrows"></tbody></table></div></section>
+  <section id="t-members" hidden>
+    <div class="card pad" style="max-width:720px;margin-bottom:16px" id="invbox"><form id="if" style="display:flex;gap:10px;align-items:end;flex-wrap:wrap">
+      <div style="flex:1;min-width:200px"><label style="margin-top:0">Invite by email</label><input id="iemail" type="email" placeholder="name@company.com" required></div>
+      <div><label style="margin-top:0">Role</label><select id="irole"><option value="member">Member</option><option value="admin">Admin</option></select></div>
+      <button class="btn btn-primary">Send invite</button></form><div class="alert" id="imsg"></div></div>
+    <div class="card" style="margin-bottom:16px"><div class="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Joined</th><th></th></tr></thead><tbody id="mrows"></tbody></table></div></div>
+    <h3 style="font-size:15px">Pending invitations</h3>
+    <div class="card"><div class="table-wrap"><table><thead><tr><th>Email</th><th>Role</th><th>Invited by</th><th>Sent</th><th></th></tr></thead><tbody id="irows"></tbody></table></div></div>
+  </section>
+  <section id="t-security" class="card pad" hidden style="max-width:640px">
+    <form id="sf"><label style="margin-top:0">Restrict invitations to a domain</label><input id="idomain" placeholder="company.com">
+    <p class="small muted">When set, admins can only invite email addresses at this domain.</p><button class="btn btn-primary">Save</button><div class="alert" id="smsg"></div></form>
+  </section>
+  <section id="t-tokens" hidden>
+    <div class="card pad" style="max-width:720px;margin-bottom:16px"><form id="tf" style="display:flex;gap:10px;align-items:end;flex-wrap:wrap">
+      <div style="flex:1;min-width:200px"><label style="margin-top:0">Token name</label><input id="tname" placeholder="ERP sync" required></div>
+      <div><label style="margin-top:0">Access</label><select id="tscope"><option value="read">Read only</option><option value="write">Read &amp; write</option></select></div>
+      <button class="btn btn-primary">Create token</button></form><div class="alert" id="tmsg"></div></div>
+    <div class="card"><div class="table-wrap"><table><thead><tr><th>Name</th><th>Owner</th><th>Access</th><th>Prefix</th><th>Last used</th><th></th></tr></thead><tbody id="trows"></tbody></table></div></div>
+  </section>
+  <section id="t-account" class="card pad" hidden style="max-width:640px">
+    <form id="af"><label style="margin-top:0">Name</label><input id="aname"><label>Email</label><input id="aemail" type="email">
+      <button class="btn btn-primary" style="margin-top:14px">Update profile</button><div class="alert" id="amsg"></div></form>
+    <hr style="border:0;border-top:1px solid var(--border);margin:24px 0">
+    <form id="pf"><label style="margin-top:0">New password</label><input id="pnew" type="password" minlength="10" autocomplete="new-password">
+      <button class="btn" style="margin-top:14px">Change password</button><div class="alert" id="pmsg"></div></form>
+  </section>
   <section id="t-billing" class="card pad" hidden style="max-width:720px"><div id="bill"></div></section>
   <section id="t-webhooks" hidden><div id="wh"></div></section>
 </main></div>
@@ -19,7 +45,25 @@ const { api, money, esc, $, alertBox, shell } = FS;
 let me;
 const loaders = {
   async general() { $('#wname').value = me.organization.name; $('#wslug').value = `app.fernspend.io/${me.organization.slug}`; },
-  async members() { const r = await api('/org/members'); $('#mrows').innerHTML = r.data.map((m) => `<tr><td>${esc(m.name)}</td><td>${esc(m.email)}</td><td style="text-transform:capitalize">${esc(m.role)}</td><td>${esc(m.created_at.slice(0, 10))}</td></tr>`).join(''); },
+  async members() {
+    const mgr = me.role === 'owner' || me.role === 'admin';
+    $('#invbox').style.display = mgr ? '' : 'none';
+    const [r, inv] = await Promise.all([api('/org/members'), api('/org/invites')]);
+    $('#mrows').innerHTML = r.data.map((m) => `<tr><td>${esc(m.name)}</td><td>${esc(m.email)}</td><td>${mgr && m.role !== 'owner' && m.id !== me.user.id
+      ? `<select data-role="${esc(m.id)}" style="height:30px;width:auto">${['member', 'admin'].map((x) => `<option ${x === m.role ? 'selected' : ''}>${x}</option>`).join('')}</select>`
+      : `<span style="text-transform:capitalize">${esc(m.role)}</span>`}</td><td>${esc(m.created_at.slice(0, 10))}</td>
+      <td>${mgr && m.role !== 'owner' && m.id !== me.user.id ? `<button class="btn btn-sm" data-rm="${esc(m.id)}">Remove</button>` : ''}</td></tr>`).join('');
+    const pending = inv.data.filter((i) => !i.accepted);
+    $('#irows').innerHTML = pending.map((i) => `<tr><td>${esc(i.email)}</td><td style="text-transform:capitalize">${esc(i.role)}</td><td>${esc(i.invited_by)}</td><td>${esc(i.created_at.slice(0, 10))}</td>
+      <td>${mgr ? `<button class="btn btn-sm" data-copy="${esc(i.token)}">Copy link</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">No pending invitations.</td></tr>';
+  },
+  async security() { const r = await api('/org/security'); $('#idomain').value = r.invite_domain || ''; $('#sf button').disabled = me.role !== 'owner'; },
+  async tokens() {
+    const r = await api('/org/tokens');
+    $('#trows').innerHTML = r.data.map((t) => `<tr><td>${esc(t.name)}</td><td>${esc(t.owner)}</td><td>${t.scope === 'write' ? 'Read &amp; write' : 'Read only'}</td><td><code>${esc(t.prefix)}…</code></td>
+      <td>${esc(t.last_used_at || 'Never')}</td><td>${t.owner_email === me.user.email ? `<button class="btn btn-sm" data-revoke="${esc(t.id)}">Revoke</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">No tokens yet.</td></tr>';
+  },
+  async account() { $('#aname').value = me.user.name; $('#aemail').value = me.user.email; },
   async billing() {
     try {
       const b = await api('/org/billing');
@@ -53,6 +97,20 @@ const loaders = {
     document.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('active', x === b));
     Object.keys(loaders).forEach((k) => $(`#t-${k}`).hidden = k !== b.dataset.t); loaders[b.dataset.t]();
   });
+  $('#t-members').onclick = async (e) => {
+    const rm = e.target.closest('[data-rm]'), cp = e.target.closest('[data-copy]');
+    if (rm && confirm('Remove this member from the workspace?')) { await api(`/org/members/${rm.dataset.rm}`, { method: 'DELETE' }); loaders.members(); }
+    if (cp) { await navigator.clipboard.writeText(`${location.origin}/invite?token=${cp.dataset.copy}`); cp.textContent = 'Copied'; }
+  };
+  $('#t-members').onchange = async (e) => { const s = e.target.closest('[data-role]'); if (!s) return; await api(`/org/members/${s.dataset.role}`, { method: 'PATCH', body: { role: s.value } }); };
+  $('#if').onsubmit = async (e) => { e.preventDefault(); try { const r = await api('/org/invites', { method: 'POST', body: { email: $('#iemail').value, role: $('#irole').value } });
+    alertBox($('#imsg'), `Invitation sent. Share this link if the email doesn't arrive: ${location.origin}${r.link}`, 'info'); $('#if').reset(); loaders.members(); } catch (err) { alertBox($('#imsg'), err.message); } };
+  $('#sf').onsubmit = async (e) => { e.preventDefault(); try { await api('/org/security', { method: 'PATCH', body: { invite_domain: $('#idomain').value } }); alertBox($('#smsg'), 'Saved.', 'info'); } catch (err) { alertBox($('#smsg'), err.message); } };
+  $('#tf').onsubmit = async (e) => { e.preventDefault(); try { const r = await api('/me/tokens', { method: 'POST', body: { name: $('#tname').value, scope: $('#tscope').value } });
+    alertBox($('#tmsg'), `Copy your token now — you won't see it again: ${r.token}`, 'info'); $('#tf').reset(); loaders.tokens(); } catch (err) { alertBox($('#tmsg'), err.message); } };
+  $('#trows').onclick = async (e) => { const b = e.target.closest('[data-revoke]'); if (b) { await api(`/me/tokens/${b.dataset.revoke}`, { method: 'DELETE' }); loaders.tokens(); } };
+  $('#af').onsubmit = async (e) => { e.preventDefault(); try { await api('/me', { method: 'PATCH', body: { name: $('#aname').value, email: $('#aemail').value } }); alertBox($('#amsg'), 'Profile updated.', 'info'); } catch (err) { alertBox($('#amsg'), err.message); } };
+  $('#pf').onsubmit = async (e) => { e.preventDefault(); try { await api('/me/password', { method: 'POST', body: { new_password: $('#pnew').value } }); alertBox($('#pmsg'), 'Password changed.', 'info'); $('#pf').reset(); } catch (err) { alertBox($('#pmsg'), err.message); } };
   $('#gf').onsubmit = async (e) => { e.preventDefault(); try { await api('/org', { method: 'PATCH', body: { name: $('#wname').value } }); alertBox($('#gmsg'), 'Saved.', 'info'); } catch (err) { alertBox($('#gmsg'), err.message); } };
   loaders.general();
 })();

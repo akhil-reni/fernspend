@@ -3,20 +3,21 @@
 <title>Expenses · Fernspend</title><link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/assets/app.css"></head>
 <body><div class="shell"><aside class="side" id="side"></aside>
 <main class="main">
-  <div class="page-head"><h1>Expenses</h1><button class="btn btn-primary" id="new">New expense</button></div>
+  <div class="page-head"><h1>Expenses</h1><div style="display:flex;gap:10px"><a class="btn" href="/api/v1/expenses/export.csv">Export CSV</a><button class="btn btn-primary" id="new">New expense</button></div></div>
   <div class="stats">
     <div class="card pad stat"><div class="k">Total in view</div><div class="v" id="s-total">—</div></div>
     <div class="card pad stat"><div class="k">Expenses</div><div class="v" id="s-count">—</div></div>
-    <div class="card pad stat"><div class="k">Your role</div><div class="v" id="s-role" style="text-transform:capitalize">—</div></div>
+    <div class="card pad stat"><div class="k">Your reimbursements</div><div class="v" id="s-wallet">—</div></div>
   </div>
   <div class="card">
     <div class="toolbar">
       <input id="q" placeholder="Search merchant, category or note">
       <select id="status"><option value="">All statuses</option><option>pending</option><option>approved</option><option>reimbursed</option><option>rejected</option></select>
     </div>
+    <div class="bulkbar" id="bulk"><span id="bulkn"></span><button class="btn btn-sm" data-bulk="approved">Approve selected</button><button class="btn btn-sm" data-bulk="rejected">Reject selected</button></div>
     <div class="table-wrap"><table>
       <thead><tr>
-        <th class="sortable" data-col="spent_at">Date</th><th class="sortable" data-col="merchant">Merchant</th>
+        <th class="mgr"><input type="checkbox" id="all" style="width:auto;height:auto"></th><th class="sortable" data-col="spent_at">Date</th><th class="sortable" data-col="merchant">Merchant</th>
         <th class="sortable" data-col="category">Category</th><th>Submitted by</th>
         <th class="sortable" data-col="status">Status</th><th class="sortable num" data-col="amount_cents">Amount</th><th></th>
       </tr></thead><tbody id="rows"></tbody></table></div>
@@ -35,9 +36,10 @@
     <div class="alert" id="emsg"></div>
   </form>
 </div></div>
+<aside class="drawer" id="drawer"></aside>
 <script src="/assets/common.js"></script>
 <script>
-const { api, money, esc, $, alertBox, shell } = FS;
+const { api, money, esc, $, alertBox, shell, md } = FS;
 const state = { q: '', status: '', sort: 'spent_at:desc', page: 1 };
 let me;
 async function load() {
@@ -45,11 +47,13 @@ async function load() {
   const r = await api('/expenses?' + p);
   $('#s-total').textContent = money(r.total_cents); $('#s-count').textContent = r.total;
   const manager = me.role === 'owner' || me.role === 'admin';
-  $('#rows').innerHTML = r.data.length ? r.data.map((e) => `<tr>
-    <td>${esc(e.spent_at)}</td><td>${esc(e.merchant)}${e.note ? `<div class="muted small">${esc(e.note)}</div>` : ''}</td><td>${esc(e.category)}</td>
+  $('#rows').innerHTML = r.data.length ? r.data.map((e) => `<tr class="clickable" data-open="${esc(e.id)}">
+    <td class="mgr">${e.status === 'pending' ? `<input type="checkbox" class="pick" value="${esc(e.id)}" style="width:auto;height:auto">` : ''}</td><td>${esc(e.spent_at)}</td><td>${esc(e.merchant)}${e.note ? `<div class="muted small">${esc(e.note)}</div>` : ''}</td><td>${esc(e.category)}</td>
     <td>${esc(e.submitted_by)}</td><td><span class="pill ${esc(e.status)}">${esc(e.status)}</span></td><td class="num">${money(e.amount_cents, e.currency)}</td>
-    <td>${manager && e.status === 'pending' ? `<button class="btn btn-sm" data-act="approved" data-id="${esc(e.id)}">Approve</button> <button class="btn btn-sm" data-act="rejected" data-id="${esc(e.id)}">Reject</button>` : manager && e.status === 'approved' ? `<button class="btn btn-sm" data-act="reimbursed" data-id="${esc(e.id)}">Mark paid</button>` : ''}</td>
-  </tr>`).join('') : `<tr><td colspan="7" class="empty">No expenses match your filters.</td></tr>`;
+    <td>${manager && e.status === 'pending' ? `<button class="btn btn-sm" data-act="approved" data-id="${esc(e.id)}">Approve</button> <button class="btn btn-sm" data-act="rejected" data-id="${esc(e.id)}">Reject</button>` : manager && e.status === 'approved' ? `<button class="btn btn-sm" data-pay="${esc(e.id)}">Reimburse</button>` : ''}</td>
+  </tr>`).join('') : `<tr><td colspan="8" class="empty">No expenses match your filters.</td></tr>`;
+  document.querySelectorAll('.mgr').forEach((el) => el.style.display = manager ? '' : 'none');
+  updateBulk();
   const pages = Math.max(1, Math.ceil(r.total / r.page_size));
   $('#pinfo').textContent = `Page ${r.page} of ${pages}`;
   $('#prev').disabled = r.page <= 1; $('#next').disabled = r.page >= pages;
@@ -57,8 +61,46 @@ async function load() {
     const [c, d] = state.sort.split(':'); th.textContent = th.textContent.replace(/ [↑↓]$/, '') + (th.dataset.col === c ? (d === 'asc' ? ' ↑' : ' ↓') : '');
   });
 }
+function updateBulk() {
+  const n = document.querySelectorAll('.pick:checked').length;
+  $('#bulk').classList.toggle('show', n > 0); $('#bulkn').textContent = `${n} selected`;
+}
+async function openDrawer(id) {
+  const d = $('#drawer'); d.classList.add('show'); d.innerHTML = '<p class="muted">Loading…</p>';
+  const [e, cm] = await Promise.all([api(`/expenses/${id}`), api(`/expenses/${id}/comments`)]);
+  const mine = e.user_id === me.user.id;
+  d.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:start"><div><h2>${esc(e.merchant)}</h2>
+      <div class="muted small">${esc(e.category)} · ${esc(e.spent_at)} · <span class="pill ${esc(e.status)}">${esc(e.status)}</span></div></div>
+      <button class="btn btn-sm" id="dclose">Close</button></div>
+    <div style="font-size:28px;font-weight:700;margin-top:14px">${money(e.amount_cents, e.currency)}</div>
+    <div class="muted small">Submitted by ${esc(e.submitted_by)}</div>
+    ${mine ? `<section><h3>Details</h3><form id="edit"><label>Merchant</label><input id="em" value="${esc(e.merchant)}">
+      <label>Amount</label><input id="ea" type="number" step="0.01" value="${(e.amount_cents / 100).toFixed(2)}">
+      <label>Note</label><textarea id="en">${esc(e.note || '')}</textarea><button class="btn btn-sm" style="margin-top:10px">Save</button><div class="alert" id="emsg2"></div></form></section>` : (e.note ? `<section><h3>Note</h3><p>${esc(e.note)}</p></section>` : '')}
+    <section><h3>Receipts</h3><div class="receipt-list">${e.receipts.map((r) => `<a href="/api/v1/receipts/${r.id}" target="_blank">${esc(r.filename)} <span class="muted small">(${Math.ceil(r.size / 1024)} KB)</span></a>`).join('') || '<p class="muted small">No receipt attached.</p>'}</div>
+      <form id="up" style="margin-top:8px"><input type="file" id="file" accept="image/*,application/pdf" style="height:auto;padding:8px"><button class="btn btn-sm" style="margin-top:8px">Upload receipt</button><div class="alert" id="umsg"></div></form></section>
+    <section><h3>Comments</h3><div id="clist">${cm.data.map((x) => `<div class="comment"><div class="meta">${esc(x.author)} · ${esc(x.created_at)}</div>${md(x.body)}</div>`).join('') || '<p class="muted small">No comments yet.</p>'}</div>
+      <form id="cf" style="margin-top:10px"><textarea id="ctext" placeholder="Add a comment. Use @name to mention someone."></textarea><div id="sugg"></div><button class="btn btn-sm" style="margin-top:8px">Comment</button></form></section>`;
+  $('#dclose').onclick = () => d.classList.remove('show');
+  if (mine) $('#edit').onsubmit = async (ev) => { ev.preventDefault(); try { await api(`/expenses/${id}/details`, { method: 'PATCH', body: { merchant: $('#em').value, amount: $('#ea').value, note: $('#en').value } }); load(); openDrawer(id); } catch (err) { alertBox($('#emsg2'), err.message); } };
+  $('#up').onsubmit = async (ev) => {
+    ev.preventDefault(); const f = $('#file').files[0]; if (!f) return;
+    const fd = new FormData(); fd.append('file', f);
+    const res = await fetch(`/api/v1/expenses/${id}/receipts`, { method: 'POST', body: fd, credentials: 'same-origin' });
+    if (!res.ok) return alertBox($('#umsg'), (await res.json()).message); openDrawer(id);
+  };
+  let t; $('#ctext').oninput = () => {
+    clearTimeout(t); const m = /@([\w.-]{2,})$/.exec($('#ctext').value); if (!m) return ($('#sugg').innerHTML = '');
+    t = setTimeout(async () => { const r = await api('/users/search?q=' + encodeURIComponent(m[1]));
+      $('#sugg').innerHTML = r.data.length ? `<div class="suggest">${r.data.map((u) => `<div data-u="${esc(u.email.split('@')[0])}">${esc(u.name)} <span class="muted">${esc(u.email)}</span></div>`).join('')}</div>` : '';
+    }, 200);
+  };
+  $('#sugg').onclick = (ev) => { const u = ev.target.closest('[data-u]'); if (!u) return; $('#ctext').value = $('#ctext').value.replace(/@[\w.-]*$/, '@' + u.dataset.u + ' '); $('#sugg').innerHTML = ''; };
+  $('#cf').onsubmit = async (ev) => { ev.preventDefault(); if (!$('#ctext').value.trim()) return; await api(`/expenses/${id}/comments`, { method: 'POST', body: { body: $('#ctext').value } }); openDrawer(id); };
+}
 (async () => {
-  me = await shell('expenses'); $('#s-role').textContent = me.role;
+  me = await shell('expenses'); $('#s-wallet').textContent = money(me.wallet.balance_cents);
   $('#d').value = new Date().toISOString().slice(0, 10);
   let t; $('#q').oninput = () => { clearTimeout(t); t = setTimeout(() => { state.q = $('#q').value; state.page = 1; load(); }, 250); };
   $('#status').onchange = () => { state.status = $('#status').value; state.page = 1; load(); };
@@ -66,7 +108,19 @@ async function load() {
     const [c, d] = state.sort.split(':'); state.sort = `${th.dataset.col}:${c === th.dataset.col && d === 'desc' ? 'asc' : 'desc'}`; load();
   });
   $('#prev').onclick = () => { state.page--; load(); }; $('#next').onclick = () => { state.page++; load(); };
-  $('#rows').onclick = async (e) => { const b = e.target.closest('button[data-act]'); if (!b) return; b.disabled = true; await api(`/expenses/${b.dataset.id}`, { method: 'PATCH', body: { status: b.dataset.act } }); load(); };
+  $('#rows').onclick = async (e) => {
+    if (e.target.classList.contains('pick')) return updateBulk();
+    const b = e.target.closest('button[data-act]'), p = e.target.closest('button[data-pay]');
+    try {
+      if (b) { b.disabled = true; await api(`/expenses/${b.dataset.id}`, { method: 'PATCH', body: { status: b.dataset.act } }); return load(); }
+      if (p) { p.disabled = true; await api(`/expenses/${p.dataset.pay}/reimburse`, { method: 'POST' }); me = await api('/me'); $('#s-wallet').textContent = money(me.wallet.balance_cents); return load(); }
+    } catch (err) { alert(err.message); return load(); }
+    const row = e.target.closest('tr[data-open]'); if (row) openDrawer(row.dataset.open);
+  };
+  $('#all').onchange = () => { document.querySelectorAll('.pick').forEach((x) => x.checked = $('#all').checked); updateBulk(); };
+  $('#bulk').onclick = async (e) => { const b = e.target.closest('[data-bulk]'); if (!b) return;
+    const ids = [...document.querySelectorAll('.pick:checked')].map((x) => x.value);
+    await api('/expenses/bulk', { method: 'POST', body: { ids, status: b.dataset.bulk } }); $('#all').checked = false; load(); };
   $('#new').onclick = () => $('#modal').classList.add('show'); $('#cancel').onclick = () => $('#modal').classList.remove('show');
   $('#ef').onsubmit = async (e) => {
     e.preventDefault();

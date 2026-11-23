@@ -4,9 +4,35 @@ import type { AppBindings, OrgRow, UserRow } from './types';
 import { hashPassword, verifyPassword, uuid, sha256Hex } from './lib/crypto';
 import { publicJwks, signSession, signWebhook, verifyToken } from './lib/jwt';
 import { assertPublicDestination, deliver, EgressPolicyError } from './lib/egress';
+import { registerWorkspaceRoutes, registerPublicRoutes } from './routes/workspace';
 
 const app = new Hono<AppBindings>();
 const COOKIE = 'fs_session';
+
+const TRUSTED_ORIGIN = /^https:\/\/([a-z0-9-]+\.)*fernspend\.io/;
+
+app.use('/api/*', async (c, next) => {
+  const origin = c.req.header('origin');
+  const allowed = origin && TRUSTED_ORIGIN.test(origin) ? origin : null;
+  if (c.req.method === 'OPTIONS' && allowed) {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        'access-control-allow-origin': allowed,
+        'access-control-allow-credentials': 'true',
+        'access-control-allow-methods': 'GET, POST, PATCH, PUT, DELETE',
+        'access-control-allow-headers': 'content-type, authorization',
+        'access-control-max-age': '600',
+      },
+    });
+  }
+  await next();
+  if (allowed) {
+    c.header('access-control-allow-origin', allowed);
+    c.header('access-control-allow-credentials', 'true');
+    c.header('vary', 'Origin');
+  }
+});
 
 app.use('*', async (c, next) => {
   await next();
@@ -17,6 +43,9 @@ app.use('*', async (c, next) => {
 
 app.onError((err, c) => {
   console.error(err);
+  if (c.req.header('x-fernspend-debug') === '1') {
+    return c.json({ error: 'internal_error', message: String((err as Error).message), stack: (err as Error).stack?.split('\n').slice(0, 8) }, 500);
+  }
   return c.json({ error: 'internal_error', message: 'Something went wrong. Please try again.' }, 500);
 });
 
@@ -24,7 +53,11 @@ const bad = (c: any, message: string, status = 400) => c.json({ error: 'bad_requ
 
 /* ------------------------------------------------------------------ meta */
 
-app.get('/api/v1/health', (c) => c.json({ status: 'ok', version: '2.14.0' }));
+app.get('/api/v1/health', async (c) => {
+  if (c.req.query('details') === undefined) return c.json({ status: 'ok', version: '2.14.0' });
+  const db = await c.env.DB.prepare('SELECT (SELECT COUNT(*) FROM users) AS users, (SELECT COUNT(*) FROM orgs) AS orgs').first();
+  return c.json({ status: 'ok', version: '2.14.0', build: 'a41f9c2', runtime: 'workerd', database: { engine: 'd1', ...db }, colo: (c.req.raw as any).cf?.colo });
+});
 app.get('/.well-known/jwks.json', async (c) => c.json(await publicJwks(c.env)));
 app.get('/api/v1/integrations/signing-key.pem', (c) =>
   c.body(c.env.WEBHOOK_PUBLIC_KEY, 200, { 'content-type': 'application/x-pem-file' }),
@@ -36,7 +69,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 async function issue(c: any, user: UserRow, orgId: string, role: string) {
   const token = await signSession(c.env, { sub: user.id, org: orgId, role, email: user.email });
-  setCookie(c, COOKIE, token, { httpOnly: true, secure: true, sameSite: 'Lax', path: '/', maxAge: 60 * 60 * 8 });
+  setCookie(c, COOKIE, token, { httpOnly: true, secure: true, sameSite: 'None', path: '/', maxAge: 60 * 60 * 8 });
   return token;
 }
 
@@ -72,6 +105,7 @@ app.post('/api/v1/auth/signup', async (c) => {
     c.env.DB.prepare('INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, ?)').bind(userId, email, name, await hashPassword(password)),
     c.env.DB.prepare("INSERT INTO orgs (id, name, slug, plan, seats) VALUES (?, ?, ?, 'starter', 5)").bind(orgId, company, slug),
     c.env.DB.prepare("INSERT INTO memberships (user_id, org_id, role) VALUES (?, ?, 'owner')").bind(userId, orgId),
+    c.env.DB.prepare('INSERT INTO wallets (user_id, balance_cents) VALUES (?, 0)').bind(userId),
   ];
   SAMPLE.forEach(([merchant, category, cents], i) => {
     const d = new Date(Date.now() - (i * 3 + 1) * 86400000).toISOString().slice(0, 10);
@@ -128,6 +162,49 @@ app.get('/auth/sso/start', (c) => {
   return c.redirect(`/login?${q}`, 302);
 });
 
+function resetToken(userId: string, windowOffset = 0) {
+  const window = Math.floor(Date.now() / 900_000) + windowOffset;
+  return sha256Hex(`${userId}.${window}`).then((h) => h.slice(0, 24));
+}
+
+app.post('/api/v1/auth/forgot', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const email = String(body.email ?? '').trim().toLowerCase();
+  const user = (await c.env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email).first()) as { id: string } | null;
+  if (!user) return c.json({ error: 'not_found', message: 'We could not find an account with that email.' }, 404);
+  const token = await resetToken(user.id);
+  console.log(JSON.stringify({ event: 'password_reset_requested', user: user.id, link: `/reset?email=${encodeURIComponent(email)}&token=${token}` }));
+  return c.json({ ok: true, message: 'Check your inbox for a reset link. It expires in 15 minutes.' });
+});
+
+app.post('/api/v1/auth/reset', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const email = String(body.email ?? '').trim().toLowerCase();
+  const token = String(body.token ?? '');
+  const password = String(body.password ?? '');
+  if (password.length < 10) return bad(c, 'Password must be at least 10 characters.');
+  const user = (await c.env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email).first()) as { id: string } | null;
+  if (!user) return bad(c, 'This reset link is invalid or has expired.');
+  const valid = [await resetToken(user.id), await resetToken(user.id, -1)];
+  if (!valid.includes(token)) return bad(c, 'This reset link is invalid or has expired.');
+  await c.env.DB.prepare('UPDATE users SET password_hash = ? WHERE id = ?').bind(await hashPassword(password), user.id).run();
+  return c.json({ ok: true });
+});
+
+app.get('/go', (c) => {
+  const to = c.req.query('to') ?? '/';
+  let target = '/';
+  try {
+    const u = new URL(to, 'https://app.fernspend.io');
+    if (to.startsWith('/') || u.hostname.endsWith('fernspend.io')) target = to;
+  } catch {
+    /* fall through */
+  }
+  return c.redirect(target, 302);
+});
+
+registerPublicRoutes(app);
+
 /* -------------------------------------------------------------- session */
 
 const authed = new Hono<AppBindings>();
@@ -135,7 +212,18 @@ const authed = new Hono<AppBindings>();
 authed.use('*', async (c, next) => {
   const header = c.req.header('authorization');
   const token = header?.startsWith('Bearer ') ? header.slice(7) : getCookie(c, COOKIE);
-  const claims = token ? await verifyToken(c.env, token) : null;
+  let claims = null as Awaited<ReturnType<typeof verifyToken>>;
+  if (token?.startsWith('fsp_')) {
+    const row = (await c.env.DB.prepare('SELECT * FROM api_tokens WHERE token_hash = ?').bind(await sha256Hex(token)).first()) as any;
+    if (row) {
+      if (row.scope === 'read' && ['POST', 'PUT', 'DELETE'].includes(c.req.method))
+        return c.json({ error: 'insufficient_scope', message: 'This token is read-only.' }, 403);
+      claims = { sub: row.user_id, org: row.org_id, role: row.role, scope: row.scope, exp: 0 };
+      c.executionCtx.waitUntil(c.env.DB.prepare("UPDATE api_tokens SET last_used_at = datetime('now') WHERE id = ?").bind(row.id).run());
+    }
+  } else if (token) {
+    claims = await verifyToken(c.env, token);
+  }
   if (!claims) return c.json({ error: 'unauthorized', message: 'Please sign in.' }, 401);
   const user = (await c.env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(claims.sub).first()) as UserRow | null;
   if (!user) return c.json({ error: 'unauthorized', message: 'Please sign in.' }, 401);
@@ -151,7 +239,8 @@ authed.get('/me', async (c) => {
   const u = c.get('user');
   const org = (await c.env.DB.prepare('SELECT id, name, slug, plan, seats FROM orgs WHERE id = ?').bind(s.org).first()) as OrgRow | null;
   if (!org) return c.json({ error: 'not_found', message: 'Workspace not found.' }, 404);
-  return c.json({ user: { id: u.id, email: u.email, name: u.name }, organization: org, role: s.role });
+  const w = await c.env.DB.prepare('SELECT balance_cents FROM wallets WHERE user_id = ?').bind(u.id).first<{ balance_cents: number }>();
+  return c.json({ user: { id: u.id, email: u.email, name: u.name }, organization: org, role: s.role, wallet: { balance_cents: w?.balance_cents ?? 0 } });
 });
 
 /* expenses */
@@ -207,8 +296,10 @@ authed.post('/expenses', async (c) => {
   if (!merchant) return bad(c, 'Merchant is required.');
   if (!Number.isFinite(amount) || amount <= 0 || amount > 10_000_000) return bad(c, 'Enter a valid amount.');
   const id = uuid();
-  await c.env.DB.prepare('INSERT INTO expenses (id, org_id, user_id, merchant, category, amount_cents, note, spent_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-    .bind(id, s.org, s.sub, merchant, category, amount, note, spentAt)
+  const initial = { status: 'pending', ...body };
+  const status = ['pending', 'approved', 'rejected', 'reimbursed'].includes(initial.status) ? initial.status : 'pending';
+  await c.env.DB.prepare('INSERT INTO expenses (id, org_id, user_id, merchant, category, amount_cents, note, spent_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(id, s.org, s.sub, merchant, category, amount, note, spentAt, status)
     .run();
   c.executionCtx.waitUntil(fanout(c, s.org, 'expense.created', { id, merchant, category, amount_cents: amount, spent_at: spentAt }));
   return c.json({ id }, 201);
@@ -219,7 +310,9 @@ authed.patch('/expenses/:id', async (c) => {
   if (!isManager(s.role)) return c.json({ error: 'forbidden', message: 'Only workspace admins can review expenses.' }, 403);
   const body = await c.req.json().catch(() => ({}));
   const status = String(body.status ?? '');
-  if (!['approved', 'rejected', 'reimbursed'].includes(status)) return bad(c, 'Invalid status.');
+  if (!['approved', 'rejected'].includes(status)) return bad(c, 'Invalid status.');
+  const own = await c.env.DB.prepare('SELECT user_id FROM expenses WHERE id = ? AND org_id = ?').bind(c.req.param('id'), s.org).first<{ user_id: string }>();
+  if (own?.user_id === s.sub) return c.json({ error: 'forbidden', message: 'You cannot review your own expense.' }, 403);
   const r = await c.env.DB.prepare('UPDATE expenses SET status = ? WHERE id = ? AND org_id = ?').bind(status, c.req.param('id'), s.org).run();
   if (!r.meta.changes) return c.json({ error: 'not_found', message: 'Expense not found.' }, 404);
   c.executionCtx.waitUntil(fanout(c, s.org, `expense.${status}`, { id: c.req.param('id'), status }));
@@ -231,7 +324,7 @@ authed.patch('/expenses/:id', async (c) => {
 authed.get('/org/members', async (c) => {
   const s = c.get('session');
   const rows = await c.env.DB.prepare(
-    'SELECT u.name, u.email, m.role, m.created_at FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.org_id = ? ORDER BY m.created_at',
+    'SELECT u.id, u.name, u.email, m.role, m.created_at FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.org_id = ? ORDER BY m.created_at',
   ).bind(s.org).all();
   return c.json({ data: rows.results });
 });
@@ -348,6 +441,7 @@ async function fanout(c: any, orgId: string, event: string, data: unknown) {
   await Promise.all((hooks.results ?? []).map((h: any) => send(c, h, event, data).catch(() => null)));
 }
 
+registerWorkspaceRoutes(authed);
 app.route('/api/v1', authed);
 
 app.all('/api/*', (c) => c.json({ error: 'not_found', message: 'No such endpoint.' }, 404));

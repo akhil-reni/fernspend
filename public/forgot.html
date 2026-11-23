@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Reset your password · Fernspend</title><link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/assets/app.css"></head>
+<body>
+<header class="container nav"><a class="logo" href="/" id="lg"><span>Fernspend</span></a><nav class="nav-links"><a href="/login">Sign in</a></nav></header>
+<div class="auth-wrap"><div class="auth card pad">
+  <h1>Forgot your password?</h1><p class="muted small" style="margin:0">We'll email you a link to reset it.</p>
+  <form id="f"><label for="email">Work email</label><input id="email" type="email" required autocomplete="email">
+  <button class="btn btn-primary w100" style="margin-top:18px">Send reset link</button></form>
+  <div class="alert" id="msg"></div>
+</div></div>
+<script src="/assets/common.js"></script>
+<script>
+const { api, $, alertBox } = FS;
+$('#lg').insertAdjacentHTML('afterbegin', FS.logo);
+$('#f').onsubmit = async (e) => { e.preventDefault();
+  try { const r = await api('/auth/forgot', { method: 'POST', body: { email: $('#email').value }, allow401: true }); alertBox($('#msg'), r.message, 'info'); }
+  catch (err) { alertBox($('#msg'), err.message); } };
+</script></body></html>
