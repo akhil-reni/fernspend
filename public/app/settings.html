@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Settings · Fernspend</title><link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/assets/app.css"></head>
+<body><div class="shell"><aside class="side" id="side"></aside>
+<main class="main">
+  <div class="page-head"><h1>Workspace settings</h1></div>
+  <div class="tabs"><button data-t="general" class="active">General</button><button data-t="members">Members</button><button data-t="billing">Billing</button><button data-t="webhooks">Webhooks</button></div>
+  <section id="t-general" class="card pad" style="max-width:640px">
+    <form id="gf"><label>Workspace name</label><input id="wname"><label>Workspace URL</label><input id="wslug" disabled>
+    <button class="btn btn-primary" style="margin-top:16px">Save changes</button><div class="alert" id="gmsg"></div></form>
+  </section>
+  <section id="t-members" class="card" hidden><div class="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Joined</th></tr></thead><tbody id="mrows"></tbody></table></div></section>
+  <section id="t-billing" class="card pad" hidden style="max-width:720px"><div id="bill"></div></section>
+  <section id="t-webhooks" hidden><div id="wh"></div></section>
+</main></div>
+<script src="/assets/common.js"></script>
+<script>
+const { api, money, esc, $, alertBox, shell } = FS;
+let me;
+const loaders = {
+  async general() { $('#wname').value = me.organization.name; $('#wslug').value = `app.fernspend.io/${me.organization.slug}`; },
+  async members() { const r = await api('/org/members'); $('#mrows').innerHTML = r.data.map((m) => `<tr><td>${esc(m.name)}</td><td>${esc(m.email)}</td><td style="text-transform:capitalize">${esc(m.role)}</td><td>${esc(m.created_at.slice(0, 10))}</td></tr>`).join(''); },
+  async billing() {
+    try {
+      const b = await api('/org/billing');
+      $('#bill').innerHTML = `<div class="kv">
+        <div>Plan</div><div style="text-transform:capitalize;font-weight:600">${esc(b.plan)}</div>
+        <div>Seats</div><div>${b.seats_used} of ${b.seats} used</div>
+        ${b.contract ? `<div>Contract reference</div><div><code>${esc(b.contract.reference)}</code></div><div>Renews on</div><div>${esc(b.contract.renews_on)}</div><div>Account manager</div><div>${esc(b.contract.account_manager)}</div>`
+          : `<div>Price</div><div>${money(b.price_per_seat_cents)} per seat / ${esc(b.interval)}</div>`}
+      </div>${b.plan !== 'enterprise' ? `<div class="upsell" style="margin-top:20px"><strong>Need SSO, webhooks or a custom contract?</strong><div class="muted small" style="margin-top:4px">Enterprise includes SAML SSO, signed webhooks, audit logs and a dedicated account manager. <a href="mailto:sales@fernspend.io">Talk to sales</a>.</div></div>` : ''}`;
+    } catch (e) { $('#bill').innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+  },
+  async webhooks() {
+    try {
+      const r = await api('/webhooks');
+      $('#wh').innerHTML = `<div class="card pad" style="max-width:720px;margin-bottom:16px"><form id="wf" style="display:flex;gap:10px;align-items:end">
+        <div style="flex:1"><label style="margin-top:0">Endpoint URL</label><input id="wurl" placeholder="https://example.com/hooks/fernspend" required></div><button class="btn btn-primary">Add endpoint</button></form><div class="alert" id="wmsg"></div>
+        <p class="small muted">Deliveries are signed. See <a href="/developers#webhooks">verifying signatures</a>.</p></div>
+        <div class="card"><div class="table-wrap"><table><thead><tr><th>Endpoint</th><th>Events</th><th>Created</th><th></th></tr></thead><tbody>${r.data.map((w) => `<tr><td><code>${esc(w.url)}</code></td><td>${esc(w.events)}</td><td>${esc(w.created_at.slice(0, 10))}</td><td><button class="btn btn-sm" data-test="${esc(w.id)}">Send test</button> <button class="btn btn-sm" data-del="${esc(w.id)}">Remove</button></td></tr>`).join('') || '<tr><td colspan="4" class="empty">No endpoints yet.</td></tr>'}</tbody></table></div></div>`;
+      $('#wf').onsubmit = async (e) => { e.preventDefault(); try { await api('/webhooks', { method: 'POST', body: { url: $('#wurl').value } }); loaders.webhooks(); } catch (err) { alertBox($('#wmsg'), err.message); } };
+      $('#wh').onclick = async (e) => {
+        const t = e.target.closest('[data-test]'), d = e.target.closest('[data-del]');
+        if (t) { t.disabled = true; const x = await api(`/webhooks/${t.dataset.test}/test`, { method: 'POST' }); t.textContent = x.delivered ? `Delivered (${x.status_code})` : (x.error || `Failed (${x.status_code})`); }
+        if (d) { await api(`/webhooks/${d.dataset.del}`, { method: 'DELETE' }); loaders.webhooks(); }
+      };
+    } catch (e) { $('#wh').innerHTML = `<div class="upsell" style="max-width:720px"><strong>Webhooks</strong><div class="muted small" style="margin-top:4px">${esc(e.message)}</div></div>`; }
+  },
+};
+(async () => {
+  me = await shell('settings');
+  document.querySelectorAll('.tabs button').forEach((b) => b.onclick = () => {
+    document.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('active', x === b));
+    Object.keys(loaders).forEach((k) => $(`#t-${k}`).hidden = k !== b.dataset.t); loaders[b.dataset.t]();
+  });
+  $('#gf').onsubmit = async (e) => { e.preventDefault(); try { await api('/org', { method: 'PATCH', body: { name: $('#wname').value } }); alertBox($('#gmsg'), 'Saved.', 'info'); } catch (err) { alertBox($('#gmsg'), err.message); } };
+  loaders.general();
+})();
+</script></body></html>

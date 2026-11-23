@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sign in · Fernspend</title><link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/assets/app.css"></head>
+<body>
+<header class="container nav"><a class="logo" href="/" id="lg"><span>Fernspend</span></a><nav class="nav-links"><a href="/signup">Create account</a></nav></header>
+<div class="auth-wrap"><div class="auth card pad">
+  <h1>Welcome back</h1><p class="muted small" style="margin:0">Sign in to your Fernspend workspace.</p>
+  <form id="f">
+    <label for="email">Work email</label><input id="email" type="email" autocomplete="email" required>
+    <div id="pwrow"><label for="password">Password</label><input id="password" type="password" autocomplete="current-password"></div>
+    <button class="btn btn-primary w100" style="margin-top:18px" id="go">Sign in</button>
+  </form>
+  <div class="divider">or</div>
+  <button class="btn w100" id="sso">Sign in with SSO</button>
+  <div class="alert" id="msg"></div>
+</div></div>
+<script src="/assets/common.js"></script>
+<script>
+const { api, $, alertBox } = FS;
+$('#lg').insertAdjacentHTML('afterbegin', FS.logo);
+const params = new URLSearchParams(location.search);
+if (params.get('error')) alertBox($('#msg'), 'Your identity provider is not responding. Try again in a few minutes or contact your administrator.');
+let ssoMode = false;
+$('#sso').onclick = () => { ssoMode = !ssoMode; $('#pwrow').style.display = ssoMode ? 'none' : ''; $('#go').textContent = ssoMode ? 'Continue with SSO' : 'Sign in'; $('#sso').textContent = ssoMode ? 'Use a password instead' : 'Sign in with SSO'; };
+$('#f').onsubmit = async (e) => {
+  e.preventDefault();
+  const email = $('#email').value;
+  try {
+    if (ssoMode) {
+      const r = await api('/auth/sso/discover', { method: 'POST', body: { email }, allow401: true });
+      if (!r.sso) return alertBox($('#msg'), 'Single sign-on is not set up for this domain. Sign in with your password.', 'info');
+      alertBox($('#msg'), `Redirecting to ${r.organization.name}'s identity provider…`, 'info');
+      setTimeout(() => location.href = r.authorize_url, 700);
+      return;
+    }
+    await api('/auth/login', { method: 'POST', body: { email, password: $('#password').value }, allow401: true });
+    const next = params.get('next');
+    location.href = next && /^\/[a-z]/.test(next) ? next : '/app';
+  } catch (err) { alertBox($('#msg'), err.message); }
+};
+</script></body></html>

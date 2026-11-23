@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "fernspend",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": true,
+    "html_handling": "auto-trailing-slash"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "fernspend-db",
+      "database_id": "b52fa19e-99b2-4acd-aab6-f55a7e9a144d"
+    }
+  ],
+  "vars": {
+    "APP_NAME": "Fernspend",
+    "SESSION_KID": "s-2025-09",
+    "WEBHOOK_KID": "whsig-2025-01",
+    "WEBHOOK_PUBLIC_KEY": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA7NNO3HurXBDLaY+3ermX\nHc5qUM49Lmgi+Owdv41npu3xLjq1zBPqwKp3tdemqHgdgKD6c1RTI3s4SMBAgttW\nz0GhBvYMpDj+Hay01WsT5bKUH41jVJytJeVMdF3QI0iZgmEwnQN7sUP+V7uIqs51\nV1K4ph6TyAVGIY2eaZDCeFvMdws+xlN1CATemwBjmX9e0LZTFs8bMyjeuVuPle8d\n5uUkAH1eT+FBpLA+Rs7rRqvfBGFy0KmYNPHNwplU0/iwlMCEApmzUsE0ywOVuUf4\nNLd6JSxQgc4jOnsbOe+aQVMb0I5sKizMPkwcQnBpxW4Trs1D5KzzFkkKq1n3dr8N\nhwIDAQAB\n-----END PUBLIC KEY-----\n"
+  }
+}

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fernspend — Expense management for growing teams</title>
+<meta name="description" content="Capture receipts, route approvals and reimburse employees in days, not weeks.">
+<link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/assets/app.css"></head>
+<body>
+<header class="container nav">
+  <a class="logo" href="/" id="lg"><span>Fernspend</span></a>
+  <nav class="nav-links"><a class="hide-sm" href="#features">Product</a><a class="hide-sm" href="#customers">Customers</a><a class="hide-sm" href="/developers">Developers</a><a href="/login">Sign in</a><a class="btn btn-primary" href="/signup">Start free</a></nav>
+</header>
+<main class="container">
+  <section class="hero">
+    <div>
+      <span class="eyebrow">New · Approval policies by department</span>
+      <h1>Expenses that close themselves.</h1>
+      <p>Fernspend captures receipts, routes approvals to the right manager and reimburses your team on the next payroll run — without spreadsheets.</p>
+      <a class="btn btn-primary" href="/signup">Create a free workspace</a> &nbsp; <a class="btn" href="/developers">Read the API docs</a>
+      <p class="small muted" style="margin-top:16px">Free for up to 5 people. No credit card required.</p>
+    </div>
+    <div class="card pad">
+      <div class="muted small">This month</div><div style="font-size:30px;font-weight:700;margin:4px 0 16px">$48,920.17</div>
+      <table><tbody>
+        <tr><td>Delta Air Lines</td><td><span class="pill approved">approved</span></td><td class="num">$482.30</td></tr>
+        <tr><td>Marriott Downtown</td><td><span class="pill pending">pending</span></td><td class="num">$614.00</td></tr>
+        <tr><td>Figma</td><td><span class="pill reimbursed">reimbursed</span></td><td class="num">$45.00</td></tr>
+        <tr><td>Sweetgreen</td><td><span class="pill approved">approved</span></td><td class="num">$31.20</td></tr>
+      </tbody></table>
+    </div>
+  </section>
+  <section class="section" id="features">
+    <h2>Everything finance asked for</h2><p class="muted" style="margin:0 0 28px">And nothing your employees will complain about.</p>
+    <div class="grid3">
+      <div class="card pad feature"><h3>Receipt capture</h3><p>Forward receipts by email or snap them from your phone. We match them to card transactions automatically.</p></div>
+      <div class="card pad feature"><h3>Approval routing</h3><p>Route by amount, department or project. Managers approve from Slack or email in one click.</p></div>
+      <div class="card pad feature"><h3>Sync &amp; webhooks</h3><p>Push approved spend to your ERP, or subscribe to signed webhooks and build your own workflows.</p></div>
+    </div>
+  </section>
+  <section class="section" id="customers">
+    <div class="logos"><span>Halvorsen Freight</span><span>Brightwater Labs</span><span>Oakline Studio</span><span>Meridian Health</span><span>Tessellate</span></div>
+    <div class="card pad" style="margin-top:28px;max-width:760px">
+      <p class="quote">“We rolled Fernspend out to 1,400 drivers and dispatchers across three countries. Month-end close went from nine days to two, and SSO meant zero passwords to manage.”</p>
+      <div class="small"><strong>Ingrid Halvorsen</strong> · VP Finance, Halvorsen Freight <span class="muted">(halvorsen-freight.com)</span></div>
+    </div>
+  </section>
+</main>
+<footer><div class="container"><span>© 2026 Fernspend, Inc.</span><span><a href="/developers">Developers</a> · <a href="/login">Sign in</a> · <a href="mailto:security@fernspend.io">Security</a></span></div></footer>
+<script src="/assets/common.js"></script><script>document.getElementById('lg').insertAdjacentHTML('afterbegin', FS.logo)</script>
+</body></html>

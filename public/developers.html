@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Developers · Fernspend</title><link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/assets/app.css"></head>
+<body>
+<header class="container nav"><a class="logo" href="/" id="lg"><span>Fernspend</span></a><nav class="nav-links"><a href="/app">Dashboard</a><a class="btn btn-primary" href="/signup">Start free</a></nav></header>
+<div class="container docs">
+  <nav><strong class="small">API reference</strong>
+    <a href="#overview">Overview</a><a href="#auth">Authentication</a><a href="#expenses">Expenses</a><a href="#org">Workspace</a><a href="#webhooks">Webhooks</a><a href="#errors">Errors</a></nav>
+  <article>
+    <h1 id="overview" style="margin-top:0">Fernspend API</h1>
+    <p class="muted">The Fernspend REST API lets you read and submit expenses, manage your workspace and react to events in real time. All endpoints live under <code>/api/v1</code> and speak JSON.</p>
+    <h2 id="auth">Authentication</h2>
+    <p>Browser sessions use the <code>fs_session</code> cookie. For scripts, send the same session token as a bearer token:</p>
+    <pre>curl https://app.fernspend.io/api/v1/me \
+  -H "Authorization: Bearer $FERNSPEND_TOKEN"</pre>
+    <p>Session tokens are JWTs signed by Fernspend and expire after 8 hours. Personal access tokens are coming soon.</p>
+    <h2 id="expenses">Expenses</h2>
+    <h3><span class="method">GET</span><code>/api/v1/expenses</code></h3>
+    <p>Lists expenses in the current workspace, 25 per page.</p>
+    <pre>q        free-text search on merchant, category and note
+status   pending | approved | rejected | reimbursed
+sort     &lt;field&gt;:&lt;asc|desc&gt;  — spent_at, merchant, category, amount_cents, status, created_at
+page     1-based page number</pre>
+    <h3><span class="method">POST</span><code>/api/v1/expenses</code></h3>
+    <pre>{ "merchant": "Delta Air Lines", "amount": 482.30, "category": "Travel", "spent_at": "2026-11-02", "note": "SFO → JFK" }</pre>
+    <h3><span class="method">PATCH</span><code>/api/v1/expenses/:id</code></h3>
+    <p>Admins and owners can set <code>status</code> to <code>approved</code>, <code>rejected</code> or <code>reimbursed</code>.</p>
+    <h2 id="org">Workspace</h2>
+    <pre>GET   /api/v1/me
+GET   /api/v1/org/members
+PATCH /api/v1/org            { "name": "Acme" }      owner only
+GET   /api/v1/org/billing                             owner only</pre>
+    <h2 id="webhooks">Webhooks <span class="pill approved" style="vertical-align:middle">Enterprise</span></h2>
+    <p>Register an HTTPS endpoint and Fernspend will POST events such as <code>expense.created</code>, <code>expense.approved</code> and <code>expense.reimbursed</code>.</p>
+    <pre>POST   /api/v1/webhooks             { "url": "https://example.com/hooks" }
+POST   /api/v1/webhooks/:id/test
+GET    /api/v1/webhooks/:id/deliveries
+DELETE /api/v1/webhooks/:id</pre>
+    <h3>Verifying signatures</h3>
+    <p>Every delivery carries a <code>Fernspend-Signature</code> header: a compact JWS (RS256) whose payload contains <code>body_sha256</code>, the hex SHA-256 of the raw request body. Fetch our public keys from the JWKS endpoint and select the key by <code>kid</code>.</p>
+    <pre>GET /.well-known/jwks.json
+GET /api/v1/integrations/signing-key.pem     # same key, PEM-encoded</pre>
+    <pre>import { createPublicKey, createHash } from "node:crypto";
+import jwt from "jsonwebtoken";
+
+const pem = await (await fetch("https://app.fernspend.io/api/v1/integrations/signing-key.pem")).text();
+
+export function verify(rawBody, signature) {
+  const claims = jwt.verify(signature, createPublicKey(pem), { algorithms: ["RS256"] });
+  const digest = createHash("sha256").update(rawBody).digest("hex");
+  if (claims.body_sha256 !== digest) throw new Error("body mismatch");
+  return JSON.parse(rawBody);
+}</pre>
+    <h2 id="errors">Errors</h2>
+    <pre>{ "error": "forbidden", "message": "Only workspace admins can review expenses." }</pre>
+    <p class="muted">400 invalid input · 401 not signed in · 402 plan required · 403 forbidden · 404 not found · 500 server error</p>
+  </article>
+</div>
+<footer><div class="container"><span>© 2026 Fernspend, Inc.</span><span>API v2.14.0</span></div></footer>
+<script src="/assets/common.js"></script><script>document.getElementById('lg').insertAdjacentHTML('afterbegin', FS.logo)</script>
+</body></html>

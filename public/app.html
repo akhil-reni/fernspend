@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Expenses · Fernspend</title><link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/assets/app.css"></head>
+<body><div class="shell"><aside class="side" id="side"></aside>
+<main class="main">
+  <div class="page-head"><h1>Expenses</h1><button class="btn btn-primary" id="new">New expense</button></div>
+  <div class="stats">
+    <div class="card pad stat"><div class="k">Total in view</div><div class="v" id="s-total">—</div></div>
+    <div class="card pad stat"><div class="k">Expenses</div><div class="v" id="s-count">—</div></div>
+    <div class="card pad stat"><div class="k">Your role</div><div class="v" id="s-role" style="text-transform:capitalize">—</div></div>
+  </div>
+  <div class="card">
+    <div class="toolbar">
+      <input id="q" placeholder="Search merchant, category or note">
+      <select id="status"><option value="">All statuses</option><option>pending</option><option>approved</option><option>reimbursed</option><option>rejected</option></select>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr>
+        <th class="sortable" data-col="spent_at">Date</th><th class="sortable" data-col="merchant">Merchant</th>
+        <th class="sortable" data-col="category">Category</th><th>Submitted by</th>
+        <th class="sortable" data-col="status">Status</th><th class="sortable num" data-col="amount_cents">Amount</th><th></th>
+      </tr></thead><tbody id="rows"></tbody></table></div>
+    <div class="pager"><span id="pinfo"></span><span><button class="btn btn-sm" id="prev">Previous</button> <button class="btn btn-sm" id="next">Next</button></span></div>
+  </div>
+</main></div>
+<div class="modal-bg" id="modal"><div class="modal card pad">
+  <h2 style="margin:0 0 4px;font-size:18px">New expense</h2><p class="muted small" style="margin:0">Submitted expenses go to your workspace admins for approval.</p>
+  <form id="ef">
+    <label>Merchant</label><input id="m" required>
+    <div class="row2"><div><label>Amount (USD)</label><input id="a" type="number" step="0.01" min="0.01" required></div>
+    <div><label>Date</label><input id="d" type="date" required></div></div>
+    <label>Category</label><select id="c"><option>Travel</option><option>Lodging</option><option>Meals</option><option>Ground transport</option><option>Software</option><option>Office supplies</option><option>Other</option></select>
+    <label>Note</label><textarea id="n" placeholder="Optional"></textarea>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px"><button type="button" class="btn" id="cancel">Cancel</button><button class="btn btn-primary">Submit</button></div>
+    <div class="alert" id="emsg"></div>
+  </form>
+</div></div>
+<script src="/assets/common.js"></script>
+<script>
+const { api, money, esc, $, alertBox, shell } = FS;
+const state = { q: '', status: '', sort: 'spent_at:desc', page: 1 };
+let me;
+async function load() {
+  const p = new URLSearchParams({ q: state.q, status: state.status, sort: state.sort, page: state.page });
+  const r = await api('/expenses?' + p);
+  $('#s-total').textContent = money(r.total_cents); $('#s-count').textContent = r.total;
+  const manager = me.role === 'owner' || me.role === 'admin';
+  $('#rows').innerHTML = r.data.length ? r.data.map((e) => `<tr>
+    <td>${esc(e.spent_at)}</td><td>${esc(e.merchant)}${e.note ? `<div class="muted small">${esc(e.note)}</div>` : ''}</td><td>${esc(e.category)}</td>
+    <td>${esc(e.submitted_by)}</td><td><span class="pill ${esc(e.status)}">${esc(e.status)}</span></td><td class="num">${money(e.amount_cents, e.currency)}</td>
+    <td>${manager && e.status === 'pending' ? `<button class="btn btn-sm" data-act="approved" data-id="${esc(e.id)}">Approve</button> <button class="btn btn-sm" data-act="rejected" data-id="${esc(e.id)}">Reject</button>` : manager && e.status === 'approved' ? `<button class="btn btn-sm" data-act="reimbursed" data-id="${esc(e.id)}">Mark paid</button>` : ''}</td>
+  </tr>`).join('') : `<tr><td colspan="7" class="empty">No expenses match your filters.</td></tr>`;
+  const pages = Math.max(1, Math.ceil(r.total / r.page_size));
+  $('#pinfo').textContent = `Page ${r.page} of ${pages}`;
+  $('#prev').disabled = r.page <= 1; $('#next').disabled = r.page >= pages;
+  document.querySelectorAll('th.sortable').forEach((th) => {
+    const [c, d] = state.sort.split(':'); th.textContent = th.textContent.replace(/ [↑↓]$/, '') + (th.dataset.col === c ? (d === 'asc' ? ' ↑' : ' ↓') : '');
+  });
+}
+(async () => {
+  me = await shell('expenses'); $('#s-role').textContent = me.role;
+  $('#d').value = new Date().toISOString().slice(0, 10);
+  let t; $('#q').oninput = () => { clearTimeout(t); t = setTimeout(() => { state.q = $('#q').value; state.page = 1; load(); }, 250); };
+  $('#status').onchange = () => { state.status = $('#status').value; state.page = 1; load(); };
+  document.querySelectorAll('th.sortable').forEach((th) => th.onclick = () => {
+    const [c, d] = state.sort.split(':'); state.sort = `${th.dataset.col}:${c === th.dataset.col && d === 'desc' ? 'asc' : 'desc'}`; load();
+  });
+  $('#prev').onclick = () => { state.page--; load(); }; $('#next').onclick = () => { state.page++; load(); };
+  $('#rows').onclick = async (e) => { const b = e.target.closest('button[data-act]'); if (!b) return; b.disabled = true; await api(`/expenses/${b.dataset.id}`, { method: 'PATCH', body: { status: b.dataset.act } }); load(); };
+  $('#new').onclick = () => $('#modal').classList.add('show'); $('#cancel').onclick = () => $('#modal').classList.remove('show');
+  $('#ef').onsubmit = async (e) => {
+    e.preventDefault();
+    try { await api('/expenses', { method: 'POST', body: { merchant: $('#m').value, amount: $('#a').value, spent_at: $('#d').value, category: $('#c').value, note: $('#n').value } });
+      $('#modal').classList.remove('show'); $('#ef').reset(); $('#d').value = new Date().toISOString().slice(0, 10); load();
+    } catch (err) { alertBox($('#emsg'), err.message); }
+  };
+  load();
+})();
+</script></body></html>

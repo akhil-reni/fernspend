@@ -1,0 +1,8 @@
+node_modules/
+.wrangler/
+.dev.vars
+.lab/
+SOLUTIONS.md
+seed.local.sql
+*.pem
+.wrangler-dev.log

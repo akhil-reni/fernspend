@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Create your workspace · Fernspend</title><link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/assets/app.css"></head>
+<body>
+<header class="container nav"><a class="logo" href="/" id="lg"><span>Fernspend</span></a><nav class="nav-links"><a href="/login">Sign in</a></nav></header>
+<div class="auth-wrap"><div class="auth card pad">
+  <h1>Create your workspace</h1><p class="muted small" style="margin:0">Free for teams of up to 5. Upgrade any time.</p>
+  <form id="f">
+    <label for="name">Full name</label><input id="name" required autocomplete="name">
+    <label for="company">Company</label><input id="company" autocomplete="organization">
+    <label for="email">Work email</label><input id="email" type="email" required autocomplete="email">
+    <label for="password">Password</label><input id="password" type="password" required minlength="10" autocomplete="new-password">
+    <button class="btn btn-primary w100" style="margin-top:18px">Create workspace</button>
+  </form>
+  <p class="small muted">By continuing you agree to the Terms of Service and Privacy Policy.</p>
+  <div class="alert" id="msg"></div>
+</div></div>
+<script src="/assets/common.js"></script>
+<script>
+const { api, $, alertBox } = FS;
+$('#lg').insertAdjacentHTML('afterbegin', FS.logo);
+$('#f').onsubmit = async (e) => {
+  e.preventDefault();
+  try {
+    await api('/auth/signup', { method: 'POST', allow401: true, body: { name: $('#name').value, company: $('#company').value, email: $('#email').value, password: $('#password').value } });
+    location.href = '/app';
+  } catch (err) { alertBox($('#msg'), err.message); }
+};
+</script></body></html>
